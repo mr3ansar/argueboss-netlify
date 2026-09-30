@@ -129,7 +129,7 @@ export default function AboutPage() {
                 { name: 'Tavily',     desc: 'Web search'    },
                 { name: 'arXiv',      desc: 'Research'      },
                 { name: 'Supabase',   desc: 'Database'      },
-                { name: 'Llama 3.3',  desc: 'AI model'      },
+                { name: 'Qwen 3.8',   desc: 'AI model'      },
               ].map(tech => (
                 <div key={tech.name} style={{
                   background: 'var(--charcoal-3)',
