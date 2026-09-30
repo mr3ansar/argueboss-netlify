@@ -10,6 +10,9 @@ import { createRouteSupabase } from '@/lib/supabaseRoute'
 
 export const dynamic = 'force-dynamic'
 
+// Single place to change the Groq model
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b'
+
 // Lazy init — never runs at module load time / build time
 function getGroq() {
   return new Groq({ apiKey: process.env.GROQ_API_KEY })
@@ -61,7 +64,7 @@ async function getPaperContext(argument: string): Promise<{ context: string; pap
 
   try {
     const questionCompletion = await getGroq().chat.completions.create({
-      model: 'llama-3.3-70b-versatile', temperature: 0.1, max_tokens: 60,
+      model: MODEL, temperature: 0.1, max_tokens: 512,
       messages: [
         { role: 'system', content: QUESTION_REWRITE_PROMPT },
         { role: 'user',   content: 'Argument: ' + argument },
@@ -94,7 +97,7 @@ async function runLite(argument: string, tone: Tone, useSearch: boolean) {
     : 'No search — reason based on general knowledge only.'
 
   const completion = await getGroq().chat.completions.create({
-    model: 'llama-3.3-70b-versatile', temperature: 0.8, max_tokens: 800,
+    model: MODEL, temperature: 0.8, max_tokens: 2048,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT(tone) },
       { role: 'user',   content: USER_PROMPT(argument, searchContext) },
@@ -125,7 +128,7 @@ async function runModerate(argument: string, tone: Tone, useSearch: boolean) {
   const fullContext = webContext + paperContext
 
   const completion = await getGroq().chat.completions.create({
-    model: 'llama-3.3-70b-versatile', temperature: 0.8, max_tokens: 1024,
+    model: MODEL, temperature: 0.8, max_tokens: 3072,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT(tone) },
       { role: 'user',   content: USER_PROMPT(argument, fullContext) },
@@ -172,12 +175,12 @@ async function runHeavy(argument: string, tone: Tone, useSearch: boolean) {
   // Step 1: Advocate and Skeptic run in parallel
   const [advocateRes, skepticBaseRes] = await Promise.all([
     getGroq().chat.completions.create({
-      model: 'llama-3.3-70b-versatile', temperature: 0.85, max_tokens: 300,
+      model: MODEL, temperature: 0.85, max_tokens: 1024,
       messages: [{ role: 'user', content: ADVOCATE_PROMPT(argument, fullContext) }],
     }),
     // Skeptic gets a placeholder — will use advocate's actual response
     getGroq().chat.completions.create({
-      model: 'llama-3.3-70b-versatile', temperature: 0.85, max_tokens: 300,
+      model: MODEL, temperature: 0.85, max_tokens: 1024,
       messages: [{ role: 'user', content: ADVOCATE_PROMPT(argument, fullContext) }],
     }),
   ])
@@ -186,14 +189,14 @@ async function runHeavy(argument: string, tone: Tone, useSearch: boolean) {
 
   // Step 2: Skeptic rebuts the advocate (sequential — needs advocate output)
   const skepticRes = await getGroq().chat.completions.create({
-    model: 'llama-3.3-70b-versatile', temperature: 0.85, max_tokens: 300,
+    model: MODEL, temperature: 0.85, max_tokens: 1024,
     messages: [{ role: 'user', content: SKEPTIC_PROMPT(argument, advocateContent, fullContext) }],
   })
   const skepticContent = skepticRes.choices[0]?.message?.content?.trim() ?? ''
 
   // Step 3: Judge rules on both
   const judgeRes = await getGroq().chat.completions.create({
-    model: 'llama-3.3-70b-versatile', temperature: 0.8, max_tokens: 400,
+    model: MODEL, temperature: 0.8, max_tokens: 1536,
     messages: [
       { role: 'system', content: 'CRITICAL: Respond ONLY with a raw JSON object. No markdown, no backticks, no explanation. Start with { and end with }.' },
       { role: 'user',   content: JUDGE_PROMPT(tone, argument, advocateContent, skepticContent) },
