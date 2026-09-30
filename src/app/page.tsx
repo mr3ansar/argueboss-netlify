@@ -70,13 +70,20 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ argument: finalArg, tone, useSearch, mode }),
       })
-      const data = await res.json()
+      const raw = await res.text()
+      let data: { error?: string; rateLimited?: boolean; resetIn?: number; detail?: string; type?: string; data?: unknown }
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        setError(`Server error (${res.status}). The server did not return a valid response.`)
+        return
+      }
 
       if (res.status === 429 || data.rateLimited) {
         setError(data.error ?? 'Too many requests.')
         setRateLimitReset(data.resetIn ?? 60)
       } else if (!res.ok || data.error) {
-        setError(data.error ?? 'Something went wrong.')
+        setError((data.error ?? 'Something went wrong.') + (data.detail ? ` [${data.detail}]` : ''))
       } else {
         setRateLimitReset(null)
 
