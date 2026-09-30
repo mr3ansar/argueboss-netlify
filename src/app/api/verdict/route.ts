@@ -270,41 +270,52 @@ function extractJSON(raw: string): string {
 
 // ── Main handler ───────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const body = await req.json() as {
+  let body: {
     argument:  string
     tone:      Tone
     useSearch: boolean
     mode:      Mode
   }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
 
   const { argument, tone, useSearch, mode = 'moderate' } = body
 
-  // Get user from session if authenticated
-  const res = NextResponse.next()
-  const supabase = createRouteSupabase(req, res)
-  const { data: { user } } = await supabase.auth.getUser()
-  const userId = user?.id
+  let headers: Record<string, string> = {}
 
-  // Rate limit per mode (dynamic import defers module evaluation to runtime)
-  const { checkRateLimit, getLiteLimiter, getModerateLimiter, getHeavyLimiter, getLiteLimiterAuth, getModerateLimiterAuth, getHeavyLimiterAuth } =
-    await import('@/lib/rateLimit')
-  const limiter =
-    mode === 'lite'  ? (userId ? getLiteLimiterAuth() : getLiteLimiter()) :
-    mode === 'heavy' ? (userId ? getHeavyLimiterAuth() : getHeavyLimiter()) :
-    (userId ? getModerateLimiterAuth() : getModerateLimiter())
-  const rl = await checkRateLimit(limiter, req, userId)
-  const headers = {
-    'X-RateLimit-Limit':     String(rl.limit),
-    'X-RateLimit-Remaining': String(rl.remaining),
-    'X-RateLimit-Reset':     String(rl.reset),
-  }
+  // Auth + rate limiting. If Supabase/Upstash is misconfigured or down, log it
+  // and carry on — this must never take the whole verdict endpoint down.
+  try {
+    const res = NextResponse.next()
+    const supabase = createRouteSupabase(req, res)
+    const { data: { user } } = await supabase.auth.getUser()
+    const userId = user?.id
 
-  if (!rl.success) {
-    const resetIn = Math.ceil((rl.reset - Date.now()) / 1000)
-    return NextResponse.json(
-      { error: 'Too many requests. The court needs a breather.', resetIn, rateLimited: true },
-      { status: 429, headers }
-    )
+    const { checkRateLimit, getLiteLimiter, getModerateLimiter, getHeavyLimiter, getLiteLimiterAuth, getModerateLimiterAuth, getHeavyLimiterAuth } =
+      await import('@/lib/rateLimit')
+    const limiter =
+      mode === 'lite'  ? (userId ? getLiteLimiterAuth() : getLiteLimiter()) :
+      mode === 'heavy' ? (userId ? getHeavyLimiterAuth() : getHeavyLimiter()) :
+      (userId ? getModerateLimiterAuth() : getModerateLimiter())
+    const rl = await checkRateLimit(limiter, req, userId)
+    headers = {
+      'X-RateLimit-Limit':     String(rl.limit),
+      'X-RateLimit-Remaining': String(rl.remaining),
+      'X-RateLimit-Reset':     String(rl.reset),
+    }
+
+    if (!rl.success) {
+      const resetIn = Math.ceil((rl.reset - Date.now()) / 1000)
+      return NextResponse.json(
+        { error: 'Too many requests. The court needs a breather.', resetIn, rateLimited: true },
+        { status: 429, headers }
+      )
+    }
+  } catch (err) {
+    console.error('Auth/rate-limit step failed (continuing without it):', err)
   }
 
   if (!argument || argument.trim().length < 5) {
@@ -323,7 +334,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('Verdict API error:', err)
     return NextResponse.json(
-      { error: 'Something went wrong. The court is experiencing technical difficulties.' },
+      { error: 'Something went wrong. The court is experiencing technical difficulties.', detail: err instanceof Error ? err.message : String(err) },
       { status: 500, headers }
     )
   }
